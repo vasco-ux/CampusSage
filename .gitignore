@@ -1,4 +1,4 @@
-# Python bytecode & cache
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
@@ -7,19 +7,31 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Virtual Environments
+# Environments & virtualenvs
 venv/
 .venv/
 env/
 ENV/
+env.bak/
+venv.bak/
 
-# Environment secrets (Never commit live credentials)
+# Environment variables & secrets (Never commit live credentials)
 .env
 backend/.env
+*.env
+*.env.*
 *.env.local
 *.env.*.local
 !.env.example
 !backend/.env.example
+
+# Local databases and vector stores (Excluded as requested)
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.sqlite3-journal
+backend/data/
 
 # Large binary files & heavy local downloads
 backend/data/raw_pdfs/
@@ -33,9 +45,3 @@ scratch/
 Thumbs.db
 .vscode/
 .idea/
-
-# KEEP CRITICAL PRE-INDEXED KNOWLEDGE BASE:
-# backend/data/campussage.db (0.5 MB SQLite metadata)
-# backend/data/chroma_db/ (8.36 MB ChromaDB vector store)
-!backend/data/campussage.db
-!backend/data/chroma_db/**
