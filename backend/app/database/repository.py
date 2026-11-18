@@ -214,7 +214,10 @@ class ConflictRepository:
     def get_all_conflicts() -> List[Dict[str, Any]]:
         with get_db() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM conflicts ORDER BY created_at DESC")
+            cursor.execute("PRAGMA table_info(conflicts);")
+            cols = [row["name"] for row in cursor.fetchall()]
+            order_col = "created_at" if "created_at" in cols else ("detected_at" if "detected_at" in cols else "id")
+            cursor.execute(f"SELECT * FROM conflicts ORDER BY {order_col} DESC")
             return [dict(row) for row in cursor.fetchall()]
 
     @staticmethod

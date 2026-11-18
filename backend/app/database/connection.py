@@ -106,6 +106,12 @@ def init_db():
         );
         """)
 
+        # Check conflict columns
+        cursor.execute("PRAGMA table_info(conflicts);")
+        conf_cols = [row["name"] for row in cursor.fetchall()]
+        if "created_at" not in conf_cols:
+            cursor.execute("ALTER TABLE conflicts ADD COLUMN created_at TIMESTAMP;")
+
         # 4. Ingestion / Scrape Audit Logs
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS ingestion_logs (
