@@ -1,0 +1,1836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CampusSage — AI-Powered Web Information & Opportunity Hub</title>
+  
+  <!-- Optional Backend API URL for decoupled Vercel deployment (leave empty if fullstack) -->
+  <meta name="campussage-api" content="">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            college: {
+              50: '#ecfdf5',
+              100: '#d1fae5',
+              200: '#a7f3d0',
+              300: '#6ee7b7',
+              400: '#34d399',
+              500: '#10b981',
+              600: '#059669',
+              700: '#047857',
+              800: '#065f46',
+              900: '#064e3b',
+            },
+            brand: {
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- React 18, ReactDOM & Babel -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Marked for Markdown rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+    code, pre {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .custom-scroll::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scroll::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased min-h-screen flex flex-col">
+  <div id="root"></div>
+
+  <!-- React Application Code -->
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo } = React;
+
+    // Production API Base URL (empty string for unified full-stack; or remote URL for decoupled Vercel)
+    const API_BASE = (
+      window.CAMPUSSAGE_API_BASE || 
+      document.querySelector('meta[name="campussage-api"]')?.getAttribute('content') || 
+      ''
+    ).replace(/\/$/, '');
+
+    function App() {
+      const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'deadlines' | 'notices' | 'conflicts' | 'ingestion'
+      const [backendStatus, setBackendStatus] = useState({ online: false, checking: true, noticeCount: 0, chunkCount: 0 });
+      const [notices, setNotices] = useState([]);
+      const [deadlines, setDeadlines] = useState([]);
+      const [conflicts, setConflicts] = useState([]);
+      const [sectionsCatalog, setSectionsCatalog] = useState([]);
+
+      // Chat state with conversational history & section filtering
+      const [chatSection, setChatSection] = useState('All');
+      const [messages, setMessages] = useState([
+        {
+          id: 'init',
+          sender: 'assistant',
+          text: "👋 Hello! I am **CampusSage**, your **AI-Powered Web Information & Opportunity Hub**.\n\n*\"Discover jobs, internships, scholarships, notices, deadlines, events, and useful information from websites in one place.\"*\n\nI am currently connected to official verified sources including **Government Engineering College, Ajmer** (54 public sections) & custom document uploads:\n- 📝 **Examinations & Revaluation:** BTU/RTU exam forms, copy view & fee deadlines\n- 💰 **Scholarships & Financial Aid:** State and national scholarship announcements & deadlines\n- 💼 **Placement & Career:** TPO announcements & industrial interaction notices\n- 🛡️ **Campus Rules & Proctor:** Student discipline, conduct & anti-ragging\n- 🏠 **Hostel Administration:** Room allotment (Boys & Girls AICTE scheme) & mess rules\n- ⚖️ **Grievance Redressal:** Formal complaints, SGRC committee & Women Cell / ICC\n- 💻 **Departments:** CSE, Civil, Mechanical, Electrical, ECE, EIC, MCA, MBA notices & labs\n- 📚 **Academic Facilities:** Central Library book bank schemes & curriculum resources\n- 📎 **Document Ingestion:** Upload any PDF circular or notice image directly using the **📎 Upload Circular** button.\n\nHow can I help you today?",
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          sources: [],
+          conflictAlert: null
+        }
+      ]);
+      const [inputQuery, setInputQuery] = useState('');
+      const [isLoading, setIsLoading] = useState(false);
+      const [selectedCitation, setSelectedCitation] = useState(null);
+      const [showDocsModal, setShowDocsModal] = useState(false);
+
+      // Upload state (supports PDF and images)
+      const [uploadState, setUploadState] = useState({ uploading: false, progress: 0, error: null, success: null });
+      const fileInputRef = useRef(null);
+      const hubFileInputRef = useRef(null);
+
+      // Refresh all data from backend API
+      async function refreshAllData() {
+        try {
+          const healthRes = await fetch(`${API_BASE}/api/health`);
+          if (healthRes.ok) {
+            const hData = await healthRes.json();
+            setBackendStatus({
+              online: true,
+              checking: false,
+              noticeCount: hData.notice_count || 0,
+              chunkCount: hData.vector_store_count || 0
+            });
+
+            const [nRes, dRes, cRes, sRes] = await Promise.all([
+              fetch(`${API_BASE}/api/notices`),
+              fetch(`${API_BASE}/api/deadlines`),
+              fetch(`${API_BASE}/api/conflicts`),
+              fetch(`${API_BASE}/api/ingest/sections`)
+            ]);
+            if (nRes.ok) setNotices(await nRes.json());
+            if (dRes.ok) setDeadlines(await dRes.json());
+            if (cRes.ok) setConflicts(await cRes.json());
+            if (sRes.ok) {
+              const secData = await sRes.json();
+              setSectionsCatalog(secData.sections || []);
+            }
+          } else {
+            setBackendStatus(s => ({ ...s, online: false, checking: false }));
+          }
+        } catch {
+          setBackendStatus(s => ({ ...s, online: false, checking: false }));
+        }
+      }
+
+      useEffect(() => {
+        refreshAllData();
+        const interval = setInterval(refreshAllData, 15000);
+        return () => clearInterval(interval);
+      }, []);
+
+      // Handle PDF and Image Document Upload
+      async function handleFileUpload(e) {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const lower = file.name.toLowerCase();
+        const isAllowed = lower.endsWith('.pdf') || lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg');
+        if (!isAllowed) {
+          setUploadState({ uploading: false, progress: 0, error: "Only official PDF circulars (.pdf) and notice images (.png, .jpg, .jpeg) are accepted.", success: null });
+          return;
+        }
+
+        setUploadState({ uploading: true, progress: 25, error: null, success: null });
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+          setUploadState(s => ({ ...s, progress: 50 }));
+          const res = await fetch(`${API_BASE}/api/upload-pdf`, {
+            method: 'POST',
+            body: formData
+          });
+
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.detail || `Upload failed with HTTP ${res.status}`);
+          }
+
+          const data = await res.json();
+          setUploadState({
+            uploading: false,
+            progress: 100,
+            error: null,
+            success: `Indexed '${file.name}' (${data.page_count} pages, ${data.chunks_indexed} vector passages). You can now ask questions about it!`
+          });
+
+          // Add a system notification in the chat
+          setMessages(prev => [
+            ...prev,
+            {
+              id: Date.now(),
+              sender: 'assistant',
+              text: `📄 **Document Ingested Successfully**\n\n- **Title:** ${data.title}\n- **Ref/ID:** \`${data.notice_id}\`\n- **Pages Parsed:** ${data.page_count}\n- **Vector Chunks Indexed:** ${data.chunks_indexed}\n- **Deadlines Detected:** ${data.deadlines_extracted}\n\n*The contents of this document are now indexed in the knowledge base. Feel free to ask any question about it!*`,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              sources: []
+            }
+          ]);
+
+          refreshAllData();
+        } catch (err) {
+          setUploadState({
+            uploading: false,
+            progress: 0,
+            error: err.message || "Failed to upload and parse document.",
+            success: null
+          });
+        } finally {
+          if (fileInputRef.current) fileInputRef.current.value = "";
+          if (hubFileInputRef.current) hubFileInputRef.current.value = "";
+        }
+      }
+
+      // Handle Chat Question with Multi-Turn Memory and Section Filter
+      async function handleSendMessage(queryText = null) {
+        const query = (queryText || inputQuery).trim();
+        if (!query || isLoading) return;
+
+        const userMsg = {
+          id: Date.now(),
+          sender: 'student',
+          text: query,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+
+        const historyPayload = messages
+          .filter(m => m.id !== 'init')
+          .slice(-6)
+          .map(m => ({
+            role: m.sender === 'student' ? 'user' : 'assistant',
+            content: m.text
+          }));
+
+        setMessages(prev => [...prev, userMsg]);
+        setInputQuery('');
+        setIsLoading(true);
+
+        try {
+          const reqBody = {
+            question: query,
+            history: historyPayload
+          };
+          if (chatSection && chatSection !== 'All') {
+            reqBody.section = chatSection;
+          }
+
+          const res = await fetch(`${API_BASE}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(reqBody)
+          });
+
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.detail || `Server status ${res.status}`);
+          }
+
+          const responseData = await res.json();
+
+          const aiMsg = {
+            id: Date.now() + 1,
+            sender: 'assistant',
+            text: responseData.answer,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            sources: responseData.sources || [],
+            conflictAlert: responseData.conflict_alert || null,
+            grounded: responseData.grounded !== false,
+            confidence: responseData.confidence || "High"
+          };
+
+          setMessages(prev => [...prev, aiMsg]);
+        } catch (err) {
+          setMessages(prev => [
+            ...prev,
+            {
+              id: Date.now() + 1,
+              sender: 'assistant',
+              text: `⚠️ **Error connecting to backend:** ${err.message}. Please verify the server is running.`,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              sources: []
+            }
+          ]);
+        } finally {
+          setIsLoading(false);
+        }
+      }
+
+      return (
+        <div className="flex flex-col min-h-screen">
+          {/* Top Navigation Bar */}
+          <header className="sticky top-0 z-40 bg-slate-900 border-b border-slate-800 text-white shadow-md">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+              {/* Logo & Product Info */}
+              <div className="flex items-center space-x-3 cursor-pointer" onClick={() => setActiveTab('chat')}>
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-college-500 to-college-700 flex items-center justify-center font-black text-xl text-white shadow-lg shadow-college-600/30">
+                  🌐
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="font-extrabold text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-300 bg-clip-text text-transparent">
+                      CampusSage
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-emerald-400 font-medium hidden sm:block">
+                    AI-Powered Web Information & Opportunity Hub
+                  </p>
+                </div>
+              </div>
+
+              {/* Navigation Tabs */}
+              <nav className="flex items-center space-x-1 sm:space-x-2">
+                {[
+                  { id: 'chat', label: 'AI Chatbot', icon: '💬' },
+                  { id: 'deadlines', label: 'Deadlines Radar', icon: '⏰', count: deadlines.length },
+                  { id: 'notices', label: 'Notice Board', icon: '📋', count: notices.length },
+                  { id: 'conflicts', label: 'Conflict Alerts', icon: '⚠️', count: conflicts.length },
+                  { id: 'ingestion', label: 'Ingestion Hub', icon: '⚙️' }
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                      activeTab === tab.id
+                        ? 'bg-college-600 text-white shadow-md shadow-college-600/30'
+                        : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                    }`}
+                  >
+                    <span>{tab.icon}</span>
+                    <span className="hidden md:inline">{tab.label}</span>
+                    {tab.count !== undefined && tab.count > 0 && (
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                        activeTab === tab.id ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'
+                      }`}>
+                        {tab.count}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </nav>
+
+              {/* System Live Pill */}
+              <div className="hidden lg:flex items-center space-x-2 text-xs">
+                <div className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-full border ${
+                  backendStatus.online 
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
+                    : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                }`}>
+                  <span className={`w-2 h-2 rounded-full ${backendStatus.online ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`}></span>
+                  <span>{backendStatus.online ? 'Knowledge Base Live' : 'Connecting to Hub...'}</span>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          {/* Main Content Area */}
+          <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+            {activeTab === 'chat' && (
+              <ChatView
+                messages={messages}
+                inputQuery={inputQuery}
+                setInputQuery={setInputQuery}
+                onSend={handleSendMessage}
+                isLoading={isLoading}
+                onSelectCitation={setSelectedCitation}
+                onClearChat={() => setMessages([messages[0]])}
+                fileInputRef={fileInputRef}
+                onFileUpload={handleFileUpload}
+                uploadState={uploadState}
+                onOpenDocsModal={() => setShowDocsModal(true)}
+                indexedDocsCount={notices.length}
+                sectionsCatalog={sectionsCatalog}
+                chatSection={chatSection}
+                setChatSection={setChatSection}
+              />
+            )}
+
+            {activeTab === 'deadlines' && (
+              <DeadlinesView
+                deadlines={deadlines}
+                sectionsCatalog={sectionsCatalog}
+                onAskAboutDeadline={(title) => {
+                  setActiveTab('chat');
+                  handleSendMessage(`What are the official details and deadlines for "${title}"?`);
+                }}
+              />
+            )}
+
+            {activeTab === 'notices' && (
+              <NoticesView
+                notices={notices}
+                sectionsCatalog={sectionsCatalog}
+                onAskAboutNotice={(title) => {
+                  setActiveTab('chat');
+                  handleSendMessage(`Summarize the official information for: "${title}"`);
+                }}
+              />
+            )}
+
+            {activeTab === 'conflicts' && (
+              <ConflictsView conflicts={conflicts} />
+            )}
+
+            {activeTab === 'ingestion' && (
+              <IngestionView
+                noticesCount={notices.length}
+                backendStatus={backendStatus}
+                sectionsCatalog={sectionsCatalog}
+                onRefresh={refreshAllData}
+                hubFileInputRef={hubFileInputRef}
+                onFileUpload={handleFileUpload}
+                uploadState={uploadState}
+              />
+            )}
+          </main>
+
+          {/* Source Citation Modal */}
+          {selectedCitation && (
+            <CitationModal
+              citation={selectedCitation}
+              onClose={() => setSelectedCitation(null)}
+            />
+          )}
+
+          {/* Indexed Documents Modal */}
+          {showDocsModal && (
+            <IndexedDocsModal
+              notices={notices}
+              onClose={() => setShowDocsModal(false)}
+              onAskAboutDoc={(title) => {
+                setShowDocsModal(false);
+                handleSendMessage(`What are the key points in "${title}"?`);
+              }}
+            />
+          )}
+
+          {/* Footer */}
+          <footer className="bg-white border-t border-slate-200 py-4 px-6 text-center text-xs text-slate-500">
+            <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+              <p className="font-semibold text-slate-700">CampusSage | AI-Powered Web Information & Opportunity Hub</p>
+              <p className="text-slate-500 text-[11px]">"Discover jobs, internships, scholarships, notices, deadlines, events, and useful information from websites in one place."</p>
+            </div>
+          </footer>
+        </div>
+      );
+    }
+
+    // --- TAB 1: Chat Interface with Section Filter & Document Upload ---
+    function ChatView({
+      messages,
+      inputQuery,
+      setInputQuery,
+      onSend,
+      isLoading,
+      onSelectCitation,
+      onClearChat,
+      fileInputRef,
+      onFileUpload,
+      uploadState,
+      onOpenDocsModal,
+      indexedDocsCount,
+      sectionsCatalog,
+      chatSection,
+      setChatSection
+    }) {
+      const messagesEndRef = useRef(null);
+
+      useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, [messages, isLoading]);
+
+      return (
+        <div className="flex flex-col h-[calc(100vh-12rem)] min-h-[600px] bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          {/* Chat Toolbar Header */}
+          <div className="px-6 py-3 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 rounded-lg bg-college-100 text-college-700 flex items-center justify-center font-bold text-sm">
+                🤖
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-slate-800">CampusSage AI Assistant</h2>
+                <p className="text-[11px] text-slate-500">Discover jobs, internships, scholarships, notices, deadlines, events, and useful information from websites in one place.</p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center space-x-2">
+              {/* Section Scope Selector */}
+              <div className="flex items-center space-x-1.5 bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs">
+                <span className="text-slate-400 text-[11px]">Scope:</span>
+                <select
+                  value={chatSection}
+                  onChange={e => setChatSection(e.target.value)}
+                  className="bg-transparent font-medium text-slate-700 focus:outline-none text-xs"
+                >
+                  <option value="All">🏛️ All Sections (Global RAG)</option>
+                  <option value="Examination Section">📝 Examination Section</option>
+                  <option value="Proctor Section & Student Discipline">🛡️ Proctor Section</option>
+                  <option value="Hostel Administration & Chief Warden Office">🏠 Hostels Administration</option>
+                  <option value="Grievance Redressal Cell">⚖️ Grievance Redressal</option>
+                  <option value="Computer Science & Engineering and IT">💻 CSE & IT Department</option>
+                  <option value="Civil Engineering Department">🏗️ Civil Engineering</option>
+                  <option value="Mechanical Engineering Department">⚙️ Mechanical Engineering</option>
+                  <option value="Electrical Engineering Department">⚡ Electrical Engineering</option>
+                  <option value="Electronics & Communication Engineering">📡 ECE Department</option>
+                  <option value="Central Library">📚 Central Library</option>
+                  <option value="Scholarship & Financial Aid Cell">💰 Scholarships Cell</option>
+                  <option value="Principal & Institutional Administration">🏛️ Principal & Administration</option>
+                </select>
+              </div>
+
+              {/* Document Inventory Button */}
+              <button
+                onClick={onOpenDocsModal}
+                className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-medium flex items-center gap-1.5 transition shadow-2xs"
+                title="View all ingested and uploaded circulars"
+              >
+                <span>📂</span>
+                <span>Indexed Docs ({indexedDocsCount})</span>
+              </button>
+
+              {/* Upload PDF / Image Circular Button */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadState.uploading}
+                className="px-3 py-1.5 rounded-lg bg-college-600 hover:bg-college-700 disabled:opacity-50 text-white text-xs font-semibold flex items-center gap-1.5 transition shadow-sm shadow-college-600/20"
+                title="Upload an official college PDF or image circular"
+              >
+                <span>{uploadState.uploading ? '⏳' : '📎'}</span>
+                <span>{uploadState.uploading ? 'Processing...' : 'Upload Circular'}</span>
+              </button>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={onFileUpload}
+                accept=".pdf, .png, .jpg, .jpeg, application/pdf, image/*"
+                className="hidden"
+              />
+
+              <button
+                onClick={onClearChat}
+                className="text-xs text-slate-400 hover:text-slate-600 px-2 py-1.5 rounded-md hover:bg-slate-200/60 transition"
+                title="Reset conversation"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+
+          {/* Upload Progress / Error / Success Alerts */}
+          {uploadState.uploading && (
+            <div className="px-6 py-2 bg-blue-50 border-b border-blue-200 flex items-center justify-between text-xs text-blue-800">
+              <span className="flex items-center gap-2">
+                <span className="animate-spin">⚙️</span>
+                <span>Uploading document & extracting verified text...</span>
+              </span>
+              <span className="font-mono">{uploadState.progress}%</span>
+            </div>
+          )}
+
+          {uploadState.error && (
+            <div className="px-6 py-2.5 bg-red-50 border-b border-red-200 text-xs text-red-800 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <span>⚠️</span>
+                <span><strong>Upload Error:</strong> {uploadState.error}</span>
+              </span>
+              <button onClick={() => setUploadState(s => ({ ...s, error: null }))} className="text-red-500 hover:text-red-700 font-bold ml-2">✕</button>
+            </div>
+          )}
+
+          {uploadState.success && (
+            <div className="px-6 py-2.5 bg-emerald-50 border-b border-emerald-200 text-xs text-emerald-800 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <span>✓</span>
+                <span>{uploadState.success}</span>
+              </span>
+              <button onClick={() => setUploadState(s => ({ ...s, success: null }))} className="text-emerald-600 hover:text-emerald-800 font-bold ml-2">✕</button>
+            </div>
+          )}
+
+          {/* Message List */}
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 custom-scroll">
+            {messages.map((msg) => (
+              <div
+                key={msg.id}
+                className={`flex gap-3 ${msg.sender === 'student' ? 'justify-end' : 'justify-start'}`}
+              >
+                {msg.sender === 'assistant' && (
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-college-600 to-college-800 text-white flex items-center justify-center text-xs shadow-sm flex-shrink-0 mt-1">
+                    AI
+                  </div>
+                )}
+
+                <div className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-3 shadow-sm ${
+                  msg.sender === 'student'
+                    ? 'bg-college-600 text-white rounded-br-none'
+                    : 'bg-slate-50 text-slate-800 border border-slate-200/80 rounded-bl-none'
+                }`}>
+                  {/* Conflict Alert Banner */}
+                  {msg.conflictAlert && (
+                    <div className="mb-2.5 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-start gap-2">
+                      <span className="text-sm">⚠️</span>
+                      <div>
+                        <span className="font-semibold">Notice Revision Detected:</span> {msg.conflictAlert}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Markdown Content */}
+                  <div 
+                    className={`text-sm leading-relaxed prose prose-sm max-w-none ${msg.sender === 'student' ? 'text-white' : 'text-slate-700'}`}
+                    dangerouslySetInnerHTML={{ __html: marked.parse(msg.text || '') }}
+                  />
+
+                  {/* Grounding & Confidence Banner */}
+                  {msg.sender === 'assistant' && msg.grounded !== undefined && (
+                    <div className="mt-2.5 pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px]">
+                      <span className={`inline-flex items-center gap-1 font-medium ${msg.grounded ? 'text-emerald-700' : 'text-amber-700'}`}>
+                        {msg.grounded ? '✓ Grounded in Verified Source Records' : '⚠️ No Official Record Found'}
+                      </span>
+                      {msg.confidence && (
+                        <span className="text-slate-400">Confidence: {msg.confidence}</span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Source Citations Badges with Section Info */}
+                  {msg.sources && msg.sources.length > 0 && (
+                    <div className="mt-3 pt-2.5 border-t border-slate-200/80">
+                      <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                        <span>📎</span> Source References ({msg.sources.length}):
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {msg.sources.map((src, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => onSelectCitation(src)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white border border-slate-300 text-[11px] text-college-700 hover:bg-college-50 hover:border-college-300 transition shadow-2xs"
+                          >
+                            <span className="font-semibold text-slate-500">[{src.section || src.id}]</span>
+                            <span className="truncate max-w-[140px] sm:max-w-[200px]">{src.title}</span>
+                            {src.content_type === 'circular_pdf' && <span className="text-slate-400">p.{src.page}</span>}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className={`text-[10px] mt-1 text-right ${msg.sender === 'student' ? 'text-blue-100' : 'text-slate-400'}`}>
+                    {msg.timestamp}
+                  </div>
+                </div>
+
+                {msg.sender === 'student' && (
+                  <div className="w-8 h-8 rounded-full bg-slate-300 text-slate-700 flex items-center justify-center text-xs font-bold flex-shrink-0 mt-1">
+                    You
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {isLoading && (
+              <div className="flex gap-3 justify-start items-center">
+                <div className="w-8 h-8 rounded-full bg-college-600 text-white flex items-center justify-center text-xs">
+                  AI
+                </div>
+                <div className="bg-slate-50 border border-slate-200/80 rounded-2xl px-4 py-3 rounded-bl-none text-xs text-slate-500 flex items-center space-x-2">
+                  <div className="w-2 h-2 rounded-full bg-college-500 animate-ping"></div>
+                  <span>Searching verified source documents & formulating evidence-grounded answer...</span>
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Quick Prompt Suggestions covering multiple sections */}
+          <div className="px-4 py-2 bg-slate-50/70 border-t border-slate-100 flex flex-wrap gap-1.5 text-xs">
+            <span className="text-slate-400 py-1 font-medium text-[11px]">Explore Sections:</span>
+            {[
+              { label: "📝 Exam Form Deadline", query: "What is the BTU B.Tech III Sem exam form deadline and fee schedule?" },
+              { label: "🛡️ Proctor Office Rules", query: "What are the Proctor Office discipline and anti-ragging rules for students?" },
+              { label: "🏠 Hostel Guidelines", query: "What are the hostel allotment guidelines and mess rules for students?" },
+              { label: "⚖️ Grievance Redressal", query: "What is the procedure for student grievance redressal at GEC Ajmer?" },
+              { label: "💻 CSE Dept Notices", query: "Are there any department notices or mercy tests for Computer Science & IT?" },
+              { label: "📚 Library Book Bank", query: "What are the rules and circulars for Central Library book bank distribution?" },
+              { label: "🏛️ Principal's Vision", query: "Summarize the Principal's address and institutional vision for GEC Ajmer." }
+            ].map((s, i) => (
+              <button
+                key={i}
+                onClick={() => onSend(s.query)}
+                disabled={isLoading}
+                className="px-2.5 py-1 rounded-full bg-white border border-slate-200 text-slate-600 hover:text-college-700 hover:border-college-300 hover:bg-college-50/50 transition text-[11px]"
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Input Box */}
+          <div className="p-3 sm:p-4 bg-white border-t border-slate-200">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                onSend();
+              }}
+              className="flex items-center gap-2"
+            >
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadState.uploading}
+                className="p-2.5 rounded-xl border border-slate-300 text-slate-500 hover:text-college-700 hover:bg-slate-100 transition"
+                title="Upload PDF or image circular to ask questions about it"
+              >
+                📎
+              </button>
+              <input
+                type="text"
+                value={inputQuery}
+                onChange={(e) => setInputQuery(e.target.value)}
+                placeholder="Search notices, scholarships, exam deadlines, departments, hostel rules, or uploaded documents..."
+                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-college-500/20 focus:border-college-500 text-sm"
+                disabled={isLoading}
+              />
+              <button
+                type="submit"
+                disabled={isLoading || !inputQuery.trim()}
+                className="px-5 py-2.5 rounded-xl bg-college-600 hover:bg-college-700 disabled:opacity-50 text-white font-medium text-sm transition flex items-center gap-1.5 shadow-sm shadow-college-600/30"
+              >
+                <span>Ask</span>
+                <span>➔</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    // --- TAB 2: Academic Deadlines Radar ---
+    function DeadlinesView({ deadlines, sectionsCatalog, onAskAboutDeadline }) {
+      const [filter, setFilter] = useState('all');
+      const [sectionFilter, setSectionFilter] = useState('All');
+      const [searchTerm, setSearchTerm] = useState('');
+
+      const filtered = useMemo(() => {
+        return deadlines.filter(d => {
+          const matchesCategory = filter === 'all' || (d.category && d.category.toLowerCase() === filter.toLowerCase());
+          const matchesSection = sectionFilter === 'All' || (d.section && d.section === sectionFilter);
+          const matchesSearch = (d.title || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+                                (d.source_title || '').toLowerCase().includes(searchTerm.toLowerCase());
+          return matchesCategory && matchesSection && matchesSearch;
+        });
+      }, [deadlines, filter, sectionFilter, searchTerm]);
+
+      return (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">Deadlines & Milestones Radar</h1>
+              <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+                Automatically tracked cutoffs, fee deadlines, and key dates from verified source documents (Active Source: GEC Ajmer & Uploads)
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={sectionFilter}
+                onChange={e => setSectionFilter(e.target.value)}
+                className="text-xs px-3 py-2 rounded-lg border border-slate-300 font-medium text-slate-700 bg-white"
+              >
+                <option value="All">All Sections</option>
+                <option value="Examination Section">Examination Section</option>
+                <option value="Proctor Section & Student Discipline">Proctor Section</option>
+                <option value="Computer Science & Engineering and IT">CSE Department</option>
+                <option value="Hostel Administration & Chief Warden Office">Hostels</option>
+                <option value="Central Library">Central Library</option>
+              </select>
+
+              <input
+                type="text"
+                placeholder="Search deadlines..."
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                className="text-xs sm:text-sm px-3.5 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-college-500/20 focus:border-college-500 w-44 sm:w-56"
+              />
+            </div>
+          </div>
+
+          {deadlines.length === 0 ? (
+            <div className="p-12 text-center bg-white rounded-2xl border border-slate-200 space-y-3">
+              <span className="text-4xl">📅</span>
+              <h3 className="font-bold text-slate-700 text-sm">No Active Deadlines Indexed Yet</h3>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                No dates have been extracted yet. Use the <strong>Ingestion Hub</strong> to crawl connected website sections or upload a notice PDF to detect verified deadlines.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filtered.map(dl => (
+                <div
+                  key={dl.id}
+                  className="bg-white rounded-2xl p-5 border border-slate-200 transition-all hover:shadow-md flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-600 uppercase tracking-wide">
+                        {dl.section || dl.category}
+                      </span>
+                      <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-college-50 text-college-700 border border-college-200">
+                        {dl.deadline_date}
+                      </span>
+                    </div>
+
+                    <h3 className="font-bold text-slate-900 text-sm leading-snug mb-2">
+                      {dl.title}
+                    </h3>
+
+                    <div className="text-xs text-slate-600 mb-3 space-y-1">
+                      <p className="flex items-center gap-1.5 font-medium text-slate-800">
+                        <span>📅 Due Date:</span>
+                        <span className="font-bold text-slate-900">{dl.deadline_date}</span>
+                      </p>
+                      {dl.notes && (
+                        <p className="text-[11px] text-slate-500 italic">
+                          ℹ️ {dl.notes}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-100 mt-2 space-y-2">
+                    <p className="text-[11px] text-slate-400 truncate" title={dl.source_title}>
+                      Source: {dl.source_title}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => onAskAboutDeadline(dl.title)}
+                        className="flex-1 text-center py-1.5 px-3 rounded-lg bg-college-50 hover:bg-college-100 text-college-700 text-xs font-semibold transition"
+                      >
+                        Ask AI About This →
+                      </button>
+                      {dl.source_url && (
+                        <a
+                          href={dl.source_url.startsWith('http') ? dl.source_url : `${API_BASE}/api/notices/pdf/${dl.source_notice_id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-2.5 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-medium transition inline-flex items-center gap-1 shadow-2xs"
+                          title="Open original circular PDF in new tab"
+                        >
+                          <span>📄</span>
+                          <span>View PDF</span>
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // --- TAB 3: Notice & Section Repository Explorer ---
+    function NoticesView({ notices, sectionsCatalog, onAskAboutNotice }) {
+      const [categoryFilter, setCategoryFilter] = useState('All');
+      const [sectionFilter, setSectionFilter] = useState('All');
+      const [sourceFilter, setSourceFilter] = useState('All');
+      const [searchQuery, setSearchQuery] = useState('');
+      const [viewMode, setViewMode] = useState('cards'); // 'cards' | 'table'
+
+      // Unique sections present in current notices
+      const availableSections = useMemo(() => {
+        const set = new Set();
+        notices.forEach(n => {
+          if (n.section) set.add(n.section);
+        });
+        return Array.from(set).sort();
+      }, [notices]);
+
+      const filteredNotices = useMemo(() => {
+        return notices.filter(n => {
+          const matchCat = categoryFilter === 'All' || n.category === categoryFilter;
+          const matchSec = sectionFilter === 'All' || n.section === sectionFilter;
+          const matchSource = sourceFilter === 'All' || 
+            (sourceFilter === 'GEC Ajmer' && (n.source_institution?.includes('Ajmer') || n.source_url?.includes('ecajmer'))) ||
+            (sourceFilter === 'User Upload' && (n.source_institution?.includes('Upload') || n.source_url?.startsWith('local://')));
+          const matchSearch = (n.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                              (n.ref_no || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                              (n.section || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                              (n.summary || '').toLowerCase().includes(searchQuery.toLowerCase());
+          return matchCat && matchSec && matchSource && matchSearch;
+        });
+      }, [notices, categoryFilter, sectionFilter, sourceFilter, searchQuery]);
+
+      // Helper to compute PDF and source document metadata
+      function getNoticeDoc(n) {
+        const isWeb = n.content_type === 'webpage' || (!n.pdf_path && !n.source_url?.toLowerCase().endsWith('.pdf') && !n.source_url?.includes('/uploads/circulars/'));
+        const isPdf = n.content_type === 'circular_pdf' || n.content_type === 'uploaded_pdf' || n.content_type === 'pdf' || (n.source_url && (n.source_url.toLowerCase().endsWith('.pdf') || n.source_url.includes('/uploads/circulars/') || n.pdf_path));
+        
+        let targetUrl = null;
+        if (n.source_url) {
+          targetUrl = n.source_url.startsWith('http') ? n.source_url : `${API_BASE}/api/notices/pdf/${n.id}`;
+        } else if (n.pdf_path) {
+          targetUrl = `${API_BASE}/api/notices/pdf/${n.id}`;
+        }
+
+        const hasPdf = isPdf && Boolean(targetUrl);
+        return { isWeb: !hasPdf && isWeb, isPdf, hasPdf, targetUrl };
+      }
+
+      return (
+        <div className="space-y-6">
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">Notices, Circulars & Opportunities Directory</h1>
+              <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+                Search verified notices, circulars, and departmental updates (Active Source: GEC Ajmer & Document Uploads)
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {/* View Mode Toggle */}
+              <div className="flex items-center rounded-xl border border-slate-300 bg-slate-100 p-0.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('cards')}
+                  className={`px-3 py-1.5 rounded-lg font-medium transition ${
+                    viewMode === 'cards'
+                      ? 'bg-white text-slate-900 shadow-2xs font-semibold'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title="Card Grid View"
+                >
+                  🎴 Cards
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('table')}
+                  className={`px-3 py-1.5 rounded-lg font-medium transition ${
+                    viewMode === 'table'
+                      ? 'bg-white text-slate-900 shadow-2xs font-semibold'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title="Dense Table View"
+                >
+                  📋 Table
+                </button>
+              </div>
+
+              {/* Section Filter */}
+              <select
+                value={sectionFilter}
+                onChange={e => setSectionFilter(e.target.value)}
+                className="text-xs px-3 py-2 rounded-xl border border-slate-300 font-medium text-slate-700 bg-white"
+              >
+                <option value="All">All Sections ({notices.length})</option>
+                {availableSections.map(sec => (
+                  <option key={sec} value={sec}>{sec}</option>
+                ))}
+              </select>
+
+              {/* Source Filter */}
+              <select
+                value={sourceFilter}
+                onChange={e => setSourceFilter(e.target.value)}
+                className="text-xs px-3 py-2 rounded-xl border border-slate-300 font-medium text-slate-700 bg-white"
+              >
+                <option value="All">All Sources</option>
+                <option value="GEC Ajmer">🏛️ GEC Ajmer (Official)</option>
+                <option value="User Upload">📎 User Uploads</option>
+              </select>
+
+              {/* Search */}
+              <input
+                type="text"
+                placeholder="Search notices..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="text-xs px-3.5 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-college-500/20 focus:border-college-500 w-44 sm:w-56"
+              />
+            </div>
+          </div>
+
+          {notices.length === 0 ? (
+            <div className="p-12 text-center bg-white rounded-2xl border border-slate-200 space-y-3">
+              <span className="text-4xl">📄</span>
+              <h3 className="font-bold text-slate-700 text-sm">No Notices Ingested Yet</h3>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                No circulars or PDFs are in the knowledge base. Ingest circulars using the <strong>Ingestion Hub</strong> tab or upload a circular PDF directly.
+              </p>
+            </div>
+          ) : viewMode === 'cards' ? (
+            /* Cards View */
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredNotices.map((n) => {
+                const doc = getNoticeDoc(n);
+                return (
+                  <div
+                    key={n.id}
+                    className="bg-white rounded-2xl p-5 border border-slate-200 transition-all hover:shadow-md flex flex-col justify-between space-y-3"
+                  >
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                        <span className="font-mono text-[11px] font-bold text-college-700 bg-college-50 px-2 py-0.5 rounded border border-college-200">
+                          {n.ref_no || n.id}
+                        </span>
+                        <span className="text-[11px] text-slate-500 font-medium">
+                          {n.issue_date || 'Date N/A'}
+                        </span>
+                      </div>
+
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                          {n.section || 'General Notice'}
+                        </span>
+                        <h3 className="text-sm font-bold text-slate-900 mt-0.5 line-clamp-2" title={n.title}>
+                          {n.title}
+                        </h3>
+                      </div>
+
+                      <p className="text-xs text-slate-600 line-clamp-3 leading-relaxed">
+                        {n.summary || 'Official announcement and document details available in the source file.'}
+                      </p>
+
+                      <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                          doc.isWeb
+                            ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                            : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        }`}>
+                          {doc.isWeb ? '🌐 Webpage' : '📄 PDF Circular'}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          • {n.chunks_count || 1} vector chunks
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          • {(n.source_institution || '').includes('Ajmer') ? 'GEC Ajmer' : 'User Upload'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons with View PDF */}
+                    <div className="pt-3 border-t border-slate-100 flex items-center gap-2">
+                      <button
+                        onClick={() => onAskAboutNotice(n.title)}
+                        className="flex-1 text-center py-1.5 px-3 rounded-lg bg-college-50 hover:bg-college-100 text-college-700 text-xs font-semibold transition"
+                      >
+                        Ask AI About This →
+                      </button>
+
+                      {doc.hasPdf ? (
+                        <a
+                          href={doc.targetUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-2.5 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-medium transition inline-flex items-center gap-1 shadow-2xs whitespace-nowrap"
+                          title="Open original circular PDF in new tab"
+                        >
+                          <span>📄</span>
+                          <span>View PDF</span>
+                        </a>
+                      ) : doc.isWeb && doc.targetUrl ? (
+                        <a
+                          href={doc.targetUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-2.5 py-1.5 rounded-lg border border-blue-200 bg-blue-50/70 hover:bg-blue-100 text-blue-700 text-xs font-medium transition inline-flex items-center gap-1 shadow-2xs whitespace-nowrap"
+                          title="Open original source webpage in new tab"
+                        >
+                          <span>🌐</span>
+                          <span>Open Original Source</span>
+                        </a>
+                      ) : (
+                        <span
+                          className="px-2 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-400 text-xs font-normal inline-flex items-center gap-1 cursor-not-allowed whitespace-nowrap"
+                          title="Original PDF attachment not available for this notice"
+                        >
+                          <span>📄</span>
+                          <span>PDF not available</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            /* Table View */
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs sm:text-sm">
+                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                    <tr>
+                      <th className="py-3.5 px-4">Ref / SNo</th>
+                      <th className="py-3.5 px-4">Section / Domain</th>
+                      <th className="py-3.5 px-4">Title & Summary</th>
+                      <th className="py-3.5 px-4">Type</th>
+                      <th className="py-3.5 px-4">Date</th>
+                      <th className="py-3.5 px-4">Institution</th>
+                      <th className="py-3.5 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredNotices.map((n) => {
+                      const doc = getNoticeDoc(n);
+                      return (
+                        <tr key={n.id} className="hover:bg-slate-50/80 transition">
+                          <td className="py-3.5 px-4 font-mono text-[11px] text-slate-500 whitespace-nowrap">
+                            <span className="font-semibold text-slate-700">{n.ref_no || n.id}</span>
+                            <br />
+                            <span className="text-[10px] text-slate-400">{n.chunks_count} vector chunks</span>
+                          </td>
+                          <td className="py-3.5 px-4 whitespace-nowrap">
+                            <span className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                              {n.section || 'General'}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4 max-w-md">
+                            <p className="font-semibold text-slate-900 leading-snug">{n.title}</p>
+                            <p className="text-xs text-slate-500 mt-1 line-clamp-2">{n.summary}</p>
+                          </td>
+                          <td className="py-3.5 px-4 whitespace-nowrap">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                              doc.isWeb
+                                ? 'bg-blue-50 text-blue-700 border border-blue-200' 
+                                : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            }`}>
+                              {doc.isWeb ? '🌐 Webpage' : '📄 PDF Circular'}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4 whitespace-nowrap text-slate-600">{n.issue_date || 'N/A'}</td>
+                          <td className="py-3.5 px-4 whitespace-nowrap">
+                            <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-medium ${
+                              (n.source_institution || '').includes('Ajmer')
+                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                : 'bg-blue-50 text-blue-800 border border-blue-200'
+                            }`}>
+                              {(n.source_institution || '').includes('Ajmer') ? '🏛️ GEC Ajmer' : '📎 Uploaded'}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4 text-right whitespace-nowrap space-x-2">
+                            {doc.hasPdf ? (
+                              <a
+                                href={doc.targetUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-2.5 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-medium transition inline-flex items-center gap-1 shadow-2xs"
+                                title="Open original circular PDF in new tab"
+                              >
+                                <span>📄</span>
+                                <span>View PDF</span>
+                              </a>
+                            ) : doc.isWeb && doc.targetUrl ? (
+                              <a
+                                href={doc.targetUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-2.5 py-1.5 rounded-lg border border-blue-200 bg-blue-50/70 hover:bg-blue-100 text-blue-700 text-xs font-medium transition inline-flex items-center gap-1 shadow-2xs"
+                                title="Open original source webpage in new tab"
+                              >
+                                <span>🌐</span>
+                                <span>Open Original Source</span>
+                              </a>
+                            ) : (
+                              <span
+                                className="px-2 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-400 text-xs font-normal inline-flex items-center gap-1 cursor-not-allowed"
+                                title="Original PDF attachment not available for this notice"
+                              >
+                                <span>📄</span>
+                                <span>PDF not available</span>
+                              </span>
+                            )}
+                            <button
+                              onClick={() => onAskAboutNotice(n.title)}
+                              className="px-2.5 py-1.5 rounded-lg bg-college-50 hover:bg-college-100 text-college-700 font-semibold text-xs transition"
+                            >
+                              Ask AI
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // --- TAB 4: Conflict Monitor ---
+    function ConflictsView({ conflicts }) {
+      return (
+        <div className="space-y-6">
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+              <span>⚠️</span> Notice Date Conflicts & Revisions Monitor
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-500 mt-1">
+              CampusSage automatically compares date statements across circulars. When a college issues a postponement or revised schedule (e.g., rescheduled practicals), the AI flags the conflict with verified document evidence.
+            </p>
+          </div>
+
+          {conflicts.length === 0 ? (
+            <div className="p-12 text-center bg-white rounded-2xl border border-slate-200 space-y-2">
+              <span className="text-3xl">✓</span>
+              <h3 className="font-bold text-slate-700 text-sm">No Conflicting Dates Detected</h3>
+              <p className="text-xs text-slate-500">
+                All currently indexed notices have consistent, unconflicted dates.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {conflicts.map(c => (
+                <div key={c.id} className="bg-white rounded-2xl border border-amber-200 shadow-sm p-6 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[11px] font-bold uppercase tracking-wider">
+                      Schedule Revision Flagged
+                    </span>
+                    <span className="text-xs text-slate-400">Notice ID: {c.superseding_notice_id}</span>
+                  </div>
+                  <h2 className="text-base font-bold text-slate-900">{c.topic}</h2>
+                  <p className="text-xs text-slate-700 leading-relaxed">{c.resolution}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // --- TAB 5: Ingestion & Diagnostics Hub with Complete College Sections Directory ---
+    function IngestionView({ noticesCount, backendStatus, sectionsCatalog, onRefresh, hubFileInputRef, onFileUpload, uploadState }) {
+      const [customUrl, setCustomUrl] = useState('https://www.ecajmer.ac.in/ui/cells/examination-section/circulars');
+      const [isCrawling, setIsCrawling] = useState(false);
+      const [crawlingSlug, setCrawlingSlug] = useState(null);
+      const [crawlResult, setCrawlResult] = useState(null);
+      const [categoryFilter, setCategoryFilter] = useState('All');
+      const [sectionSearch, setSectionSearch] = useState('');
+      const [crawlLogs, setCrawlLogs] = useState([
+        "[INFO] CampusSage Web Ingestion Hub initialized.",
+        "[INFO] Connected to Government Engineering College, Ajmer (ecajmer.ac.in).",
+        "[INFO] Total Discovered Public Sections: 54 (36 Cells + 13 Departments + 5 Administrative)",
+        `[INFO] Active genuine documents in knowledge base: ${noticesCount}`
+      ]);
+
+      // Category breakdown
+      const categories = [
+        "All",
+        "Examinations",
+        "Academics",
+        "Engineering Departments",
+        "Postgraduate Departments",
+        "Applied Sciences & Humanities",
+        "Student Welfare & Hostels",
+        "Student Welfare & Redressal",
+        "Administration",
+        "Academic Facilities",
+        "Placement & Industry",
+        "Clubs & Activities",
+        "Campus Life"
+      ];
+
+      const filteredSections = useMemo(() => {
+        return sectionsCatalog.filter(s => {
+          const matchCat = categoryFilter === 'All' || s.category === categoryFilter;
+          const matchSearch = (s.name || '').toLowerCase().includes(sectionSearch.toLowerCase()) ||
+                              (s.slug || '').toLowerCase().includes(sectionSearch.toLowerCase()) ||
+                              (s.description || '').toLowerCase().includes(sectionSearch.toLowerCase());
+          return matchCat && matchSearch;
+        });
+      }, [sectionsCatalog, categoryFilter, sectionSearch]);
+
+      // Ingest a specific section on-demand
+      async function handleCrawlSection(sec) {
+        setCrawlingSlug(sec.slug);
+        setCrawlResult(null);
+        setCrawlLogs(prev => [
+          ...prev,
+          `[INFO] Initiating targeted crawl for section: [${sec.name}] (${sec.slug})`,
+          `[INFO] Target: ${sec.public_url}`
+        ]);
+
+        try {
+          const res = await fetch(`${API_BASE}/api/ingest/section/${sec.slug}?max_items=4`, {
+            method: 'POST'
+          });
+          const data = await res.json();
+          setCrawlResult(data);
+
+          if (data.logs && data.logs.length > 0) {
+            setCrawlLogs(data.logs);
+          }
+
+          if (data.status === 'warning') {
+            setCrawlLogs(prev => [...prev, `[WARNING] ${data.message}`]);
+          } else {
+            setCrawlLogs(prev => [
+              ...prev,
+              `[SUCCESS] Ingested ${data.notices_found} items (${data.chunks_indexed} vector chunks) from [${sec.name}]!`
+            ]);
+          }
+
+          onRefresh();
+        } catch (err) {
+          setCrawlLogs(prev => [...prev, `[ERROR] Failed section crawl: ${err.message}`]);
+        } finally {
+          setCrawlingSlug(null);
+        }
+      }
+
+      // Ingest entire college website or category
+      async function handleCrawlAll() {
+        setIsCrawling(true);
+        setCrawlResult(null);
+        setCrawlLogs(prev => [
+          ...prev,
+          `[INFO] Initiating College-Wide Ingestion across all public sections...`,
+          `[INFO] Crawling landing overviews, rules, policies, and circular PDFs...`
+        ]);
+
+        try {
+          const catParam = categoryFilter !== 'All' ? `?category=${encodeURIComponent(categoryFilter)}&max_per_section=2` : '?max_per_section=2';
+          const res = await fetch(`${API_BASE}/api/ingest/scrape-all${catParam}`, { method: 'POST' });
+          const data = await res.json();
+          setCrawlResult(data);
+
+          if (data.logs && data.logs.length > 0) {
+            setCrawlLogs(data.logs);
+          }
+
+          onRefresh();
+        } catch (err) {
+          setCrawlLogs(prev => [...prev, `[ERROR] College-wide crawl failed: ${err.message}`]);
+        } finally {
+          setIsCrawling(false);
+        }
+      }
+
+      // Crawl custom URL
+      async function handleStartCrawl(e) {
+        e.preventDefault();
+        if (!customUrl.trim()) return;
+
+        setIsCrawling(true);
+        setCrawlResult(null);
+        setCrawlLogs(prev => [
+          ...prev,
+          `[INFO] Initiating ingestion for: ${customUrl}`,
+          "[INFO] Checking robots.txt and official circular API endpoints..."
+        ]);
+
+        try {
+          const res = await fetch(`${API_BASE}/api/ingest/scrape`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: customUrl })
+          });
+
+          const data = await res.json();
+          setCrawlResult(data);
+
+          if (data.logs && data.logs.length > 0) {
+            setCrawlLogs(data.logs);
+          }
+
+          onRefresh();
+        } catch (err) {
+          setCrawlLogs(prev => [...prev, `[ERROR] Failed to execute crawl: ${err.message}`]);
+        } finally {
+          setIsCrawling(false);
+        }
+      }
+
+      async function handleClearAll() {
+        if (!confirm('Are you sure you want to clear all notices, deadlines, and vector indexes?')) return;
+        try {
+          const res = await fetch(`${API_BASE}/api/ingest/clear-data`, { method: 'POST' });
+          if (res.ok) {
+            alert('Knowledge base and vector store cleared.');
+            onRefresh();
+            setCrawlLogs(["[INFO] Knowledge base and vector store cleared."]);
+          }
+        } catch (e) {
+          alert('Failed to clear: ' + e.message);
+        }
+      }
+
+      return (
+        <div className="space-y-6">
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">Web Ingestion & Sources Hub</h1>
+              <p className="text-xs sm:text-sm text-slate-500 mt-1">
+                Active Source: Government Engineering College, Ajmer (ecajmer.ac.in) — Automated Discovery & Ingestion
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleCrawlAll}
+                disabled={isCrawling || crawlingSlug !== null}
+                className="px-4 py-2 rounded-xl bg-college-600 hover:bg-college-700 disabled:opacity-50 text-white text-xs font-semibold transition flex items-center gap-1.5 shadow-sm shadow-college-600/30"
+              >
+                <span>{isCrawling ? '⏳' : '🌐'}</span>
+                <span>{isCrawling ? 'Crawling Website...' : 'Crawl Entire Website'}</span>
+              </button>
+
+              <button
+                onClick={handleClearAll}
+                className="px-3 py-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-xs font-semibold transition"
+              >
+                Clear Data
+              </button>
+            </div>
+          </div>
+
+          {/* System Metrics */}
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+              <p className="text-xs font-semibold text-slate-400 uppercase">Indexed Documents</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1">{backendStatus.noticeCount}</p>
+              <span className="text-[10px] text-emerald-600 font-medium">SQLite Synchronized</span>
+            </div>
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+              <p className="text-xs font-semibold text-slate-400 uppercase">Vector Chunks</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1">{backendStatus.chunkCount}</p>
+              <span className="text-[10px] text-blue-600 font-medium">Vector Semantic Index</span>
+            </div>
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+              <p className="text-xs font-semibold text-slate-400 uppercase">Discovered Sections</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1">{sectionsCatalog.length || 54}</p>
+              <span className="text-[10px] text-purple-600 font-medium">Cells, Depts & Admin</span>
+            </div>
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+              <p className="text-xs font-semibold text-slate-400 uppercase">Ingestion Engine</p>
+              <p className="text-sm font-bold text-slate-900 mt-1">Multi-Source Web Crawler</p>
+              <span className="text-[10px] text-emerald-600 font-medium">Webpage & PDF Ingestion Active</span>
+            </div>
+          </div>
+
+          {/* Section Matrix / College Sections Catalog */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-slate-900">Connected Website Sections Directory (GEC Ajmer)</h2>
+                <p className="text-xs text-slate-500">Crawl and index individual cells, departments, administrative bodies, or student welfare offices on-demand.</p>
+              </div>
+
+              <input
+                type="text"
+                placeholder="Search sections by name or slug..."
+                value={sectionSearch}
+                onChange={e => setSectionSearch(e.target.value)}
+                className="text-xs px-3.5 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-college-500/20 w-56 sm:w-72"
+              />
+            </div>
+
+            {/* Category Filter Pills */}
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {categories.map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => setCategoryFilter(cat)}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition ${
+                    categoryFilter === cat
+                      ? 'bg-slate-900 text-white shadow-2xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+
+            {/* Sections Table */}
+            <div className="border border-slate-200 rounded-xl overflow-hidden mt-3">
+              <div className="overflow-x-auto max-h-96 custom-scroll">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-600 font-semibold sticky top-0 border-b border-slate-200 z-10">
+                    <tr>
+                      <th className="py-2.5 px-3">Section Name & Domain</th>
+                      <th className="py-2.5 px-3">Category</th>
+                      <th className="py-2.5 px-3">Type</th>
+                      <th className="py-2.5 px-3">Indexed Content</th>
+                      <th className="py-2.5 px-3">Website Link</th>
+                      <th className="py-2.5 px-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredSections.map(sec => {
+                      const isThisCrawling = crawlingSlug === sec.slug;
+                      return (
+                        <tr key={sec.slug} className="hover:bg-slate-50/70 transition">
+                          <td className="py-2.5 px-3 max-w-xs">
+                            <span className="font-bold text-slate-900">{sec.name}</span>
+                            <p className="text-[11px] text-slate-500 truncate" title={sec.description}>{sec.description}</p>
+                          </td>
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700">
+                              {sec.category}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 whitespace-nowrap text-slate-500 uppercase text-[10px] font-mono">
+                            {sec.type}
+                          </td>
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            {sec.doc_count > 0 ? (
+                              <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                ✓ {sec.doc_count} docs ({sec.chunks_count} chunks)
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-slate-400 italic">Not yet indexed</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            {sec.public_url && (
+                              <a
+                                href={sec.public_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-college-600 hover:text-college-800 text-[11px] flex items-center gap-1 font-medium"
+                              >
+                                <span>🌐 Link</span>
+                                <span>↗</span>
+                              </a>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                            <button
+                              onClick={() => handleCrawlSection(sec)}
+                              disabled={isThisCrawling || isCrawling}
+                              className="px-3 py-1 rounded-lg bg-college-50 hover:bg-college-100 disabled:opacity-50 text-college-700 font-semibold text-[11px] border border-college-200 transition"
+                            >
+                              {isThisCrawling ? 'Crawling...' : 'Crawl Section'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          {/* Crawler Form & Presets */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+            <h2 className="text-base font-bold text-slate-900">Direct Notice Page or PDF Ingestion</h2>
+            <form onSubmit={handleStartCrawl} className="flex flex-col sm:flex-row gap-3">
+              <input
+                type="url"
+                value={customUrl}
+                onChange={e => setCustomUrl(e.target.value)}
+                placeholder="Enter college notice page URL"
+                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-college-500/20 focus:border-college-500"
+              />
+              <button
+                type="submit"
+                disabled={isCrawling || !customUrl.trim()}
+                className="px-6 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-medium text-sm transition flex items-center justify-center gap-2"
+              >
+                {isCrawling ? 'Ingesting Circulars...' : 'Scrape & Ingest'}
+              </button>
+            </form>
+
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+              <span className="font-medium">Preset GEC Ajmer Sections:</span>
+              {[
+                { name: "Examination Section", url: "https://www.ecajmer.ac.in/ui/cells/examination-section/circulars" },
+                { name: "Proctor Section", url: "https://www.ecajmer.ac.in/ui/cells/proctor/circulars" },
+                { name: "CSE Department", url: "https://www.ecajmer.ac.in/department/cs-it/about" },
+                { name: "Hostels Office", url: "https://www.ecajmer.ac.in/ui/cells/hostels/circulars" },
+                { name: "Grievance Cell", url: "https://www.ecajmer.ac.in/ui/cells/grievance/circulars" },
+                { name: "Central Library", url: "https://www.ecajmer.ac.in/ui/cells/central-library/circulars" },
+                { name: "Principal Address", url: "https://www.ecajmer.ac.in/administration/PrincipalMessage" }
+              ].map(p => (
+                <button
+                  key={p.name}
+                  type="button"
+                  onClick={() => setCustomUrl(p.url)}
+                  className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 font-medium text-[11px] text-slate-700 border border-slate-200 transition"
+                >
+                  {p.name}
+                </button>
+              ))}
+            </div>
+
+            {/* Warning Alert if 0 documents found */}
+            {crawlResult && crawlResult.status === 'warning' && (
+              <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs space-y-1">
+                <p className="font-bold flex items-center gap-1.5">
+                  <span>⚠️</span>
+                  <span>Zero Documents Found</span>
+                </p>
+                <p>{crawlResult.message}</p>
+              </div>
+            )}
+
+            {/* Success Alert if documents found */}
+            {crawlResult && crawlResult.status === 'success' && (
+              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs space-y-1">
+                <p className="font-bold flex items-center gap-1.5">
+                  <span>✓</span>
+                  <span>Ingestion Completed Successfully</span>
+                </p>
+                <p>{crawlResult.message}</p>
+              </div>
+            )}
+          </div>
+
+          {/* Manual Document Upload Card */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+            <h2 className="text-base font-bold text-slate-900">Direct Document Upload (PDF or Image)</h2>
+            <p className="text-xs text-slate-500">
+              Upload official documents in PDF or image format (.pdf, .png, .jpg). The system will extract text, generate semantic embeddings, and index into the knowledge base.
+            </p>
+            <div className="flex items-center gap-3">
+              <input
+                type="file"
+                ref={hubFileInputRef}
+                onChange={onFileUpload}
+                accept=".pdf, .png, .jpg, .jpeg, application/pdf, image/*"
+                className="text-xs text-slate-600 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-college-50 file:text-college-700 hover:file:bg-college-100"
+              />
+              {uploadState.uploading && (
+                <span className="text-xs text-blue-600 font-medium animate-pulse">
+                  Uploading & vectorizing...
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Diagnostic Log Console */}
+          <div className="bg-slate-900 rounded-2xl p-5 border border-slate-800 shadow-sm space-y-2">
+            <div className="flex items-center justify-between text-xs text-slate-400 border-b border-slate-800 pb-2">
+              <span className="font-mono flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-400"></span> Ingestion & Crawler Diagnostic Console
+              </span>
+              <span className="text-[10px]">Real-Time Execution Logs</span>
+            </div>
+            <div className="font-mono text-xs text-slate-300 space-y-1 max-h-60 overflow-y-auto custom-scroll pt-2">
+              {crawlLogs.map((log, i) => {
+                const isError = log.includes('[ERROR]') || log.includes('[WARNING]');
+                const isSuccess = log.includes('[SUCCESS]');
+                const isSkip = log.includes('[SKIP]');
+                return (
+                  <p
+                    key={i}
+                    className={`leading-relaxed ${
+                      isError ? 'text-amber-300' : isSuccess ? 'text-emerald-300' : isSkip ? 'text-slate-400' : 'text-slate-300'
+                    }`}
+                  >
+                    {log}
+                  </p>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- Indexed Documents Modal ---
+    function IndexedDocsModal({ notices, onClose, onAskAboutDoc }) {
+      return (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in duration-150 flex flex-col max-h-[85vh]">
+            <div className="flex items-start justify-between gap-3 mb-4 pb-3 border-b border-slate-100">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Active Indexed Documents in Knowledge Base</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  These official documents are vectorized and available for RAG question answering.
+                </p>
+              </div>
+              <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-lg font-bold p-1">✕</button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-3 custom-scroll pr-1 text-xs">
+              {notices.length === 0 ? (
+                <p className="text-center py-8 text-slate-400">No documents indexed yet.</p>
+              ) : (
+                notices.map(n => (
+                  <div key={n.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100/70 transition space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono font-bold text-college-700 bg-college-50 px-2 py-0.5 rounded border border-college-200">
+                        {n.ref_no || n.id}
+                      </span>
+                      <span className="text-[11px] text-slate-500">{n.section || n.category || 'General'}</span>
+                    </div>
+                    <h4 className="font-bold text-slate-800 text-sm">{n.title}</h4>
+                    <p className="text-slate-500 line-clamp-2">{n.summary}</p>
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-200/60">
+                      <span className="text-slate-400 font-mono text-[10px]">
+                        {n.chunks_count || 1} vector chunks • {n.source_institution || 'GEC Ajmer'}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {n.content_type === 'webpage' ? (
+                          n.source_url ? (
+                            <a
+                              href={n.source_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="px-2.5 py-1 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium text-xs transition inline-flex items-center gap-1 border border-blue-200"
+                              title="Open original source webpage in new tab"
+                            >
+                              <span>🌐</span>
+                              <span>Open Original Source</span>
+                            </a>
+                          ) : (
+                            <span className="px-2 py-1 rounded bg-slate-100 text-slate-400 text-xs">PDF not available</span>
+                          )
+                        ) : (n.source_url || n.pdf_path) ? (
+                          <a
+                            href={n.source_url && n.source_url.startsWith('http') ? n.source_url : `/api/notices/pdf/${n.id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs transition inline-flex items-center gap-1 border border-slate-300"
+                            title="Open original notice PDF in new tab"
+                          >
+                            <span>📄</span>
+                            <span>View PDF</span>
+                          </a>
+                        ) : (
+                          <span className="px-2 py-1 rounded bg-slate-100 text-slate-400 text-xs">PDF not available</span>
+                        )}
+                        <button
+                          onClick={() => onAskAboutDoc(n.title)}
+                          className="px-3 py-1 rounded bg-college-600 hover:bg-college-700 text-white font-semibold text-xs transition"
+                        >
+                          Ask Question
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-slate-100 flex justify-end">
+              <button onClick={onClose} className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- Source Citation Modal ---
+    function CitationModal({ citation, onClose }) {
+      return (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in duration-150">
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-college-50 text-college-700 font-bold">
+                  {citation.id}
+                </span>
+                <h3 className="text-base font-bold text-slate-900 mt-1 leading-snug">
+                  {citation.title}
+                </h3>
+              </div>
+              <button
+                onClick={onClose}
+                className="text-slate-400 hover:text-slate-700 text-lg font-bold p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">College Section</span>
+                  <span className="font-semibold text-slate-800">{citation.section || 'General'}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Category</span>
+                  <span className="font-semibold text-slate-800">{citation.category}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Date Issued</span>
+                  <span className="font-semibold text-slate-800">{citation.date || 'N/A'}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Document Type</span>
+                  <span className="font-semibold text-slate-800">{citation.content_type === 'webpage' ? 'Official Webpage' : `PDF (Page ${citation.page})`}</span>
+                </div>
+              </div>
+
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-bold mb-1">
+                  Matched Evidence Excerpt:
+                </span>
+                <div className="bg-slate-100/80 p-3 rounded-xl border border-slate-200 text-slate-700 leading-relaxed italic">
+                  "{citation.snippet}"
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-end gap-2">
+              {citation.source_url && (
+                <a
+                  href={citation.source_url.startsWith('http') ? citation.source_url : '#'}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-4 py-2 rounded-xl bg-college-600 hover:bg-college-700 text-white text-xs font-semibold transition inline-flex items-center gap-1.5"
+                >
+                  <span>{citation.content_type === 'webpage' ? '🌐' : '📄'}</span>
+                  <span>{citation.content_type === 'webpage' ? 'Open Official Webpage' : 'Open Circular PDF'}</span>
+                </a>
+              )}
+              <button
+                onClick={onClose}
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

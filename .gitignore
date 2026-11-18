@@ -1,0 +1,41 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# Environment secrets (Never commit live credentials)
+.env
+backend/.env
+*.env.local
+*.env.*.local
+!.env.example
+!backend/.env.example
+
+# Large binary files & heavy local downloads
+backend/data/raw_pdfs/
+backend/data/models/
+backend/data_backup_*/
+scratch/
+*.log
+
+# OS & Editor generated files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# KEEP CRITICAL PRE-INDEXED KNOWLEDGE BASE:
+# backend/data/campussage.db (0.5 MB SQLite metadata)
+# backend/data/chroma_db/ (8.36 MB ChromaDB vector store)
+!backend/data/campussage.db
+!backend/data/chroma_db/**
