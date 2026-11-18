@@ -82,6 +82,7 @@
     const API_BASE = (
       window.CAMPUSSAGE_API_BASE || 
       document.querySelector('meta[name="campussage-api"]')?.getAttribute('content') || 
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('campussage_api_base') : '') ||
       ''
     ).replace(/\/$/, '');
 

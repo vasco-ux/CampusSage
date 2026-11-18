@@ -23,10 +23,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize SQLite database on startup
+# Initialize SQLite database and auto-seed if fresh instance
 @app.on_event("startup")
 def on_startup():
     init_db()
+    try:
+        from app.database.seeder import seed_database_if_empty
+        seed_database_if_empty()
+    except Exception as e:
+        print(f"[STARTUP] Seeder notice: {e}")
 
 # Register API Routers
 app.include_router(health.router)
@@ -53,3 +58,8 @@ else:
     @app.get("/")
     def root():
         return {"message": "CampusSage Backend API is active.", "docs_url": "/docs"}
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("app.main:app", host="0.0.0.0", port=port)

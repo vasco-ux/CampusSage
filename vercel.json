@@ -3,6 +3,7 @@
   "public": true,
   "cleanUrls": true,
   "rewrites": [
+    { "source": "/", "destination": "/frontend/public/index.html" },
     { "source": "/(.*)", "destination": "/frontend/public/$1" }
   ]
 }
