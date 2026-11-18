@@ -2,11 +2,16 @@ import os
 from pydantic_settings import BaseSettings
 from typing import Optional
 
+def _detect_production() -> bool:
+    """Returns True if running in a cloud deployment environment (e.g. Render, Railway, Vercel)."""
+    return bool(os.getenv("RENDER") or os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("ENVIRONMENT") == "production")
+
 class Settings(BaseSettings):
     APP_NAME: str = "CampusSage"
-    DEBUG: bool = True
+    ENVIRONMENT: str = "production" if _detect_production() else "development"
+    DEBUG: bool = False if _detect_production() else True
     
-    # Paths
+    # Paths (Resolved dynamically relative to backend root)
     BASE_DIR: str = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     DATA_DIR: str = os.path.join(BASE_DIR, "data")
     PDF_DIR: str = os.path.join(DATA_DIR, "raw_pdfs")
@@ -21,8 +26,8 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 120
     SIMILARITY_TOP_K: int = 4
 
-    # LLM Settings
-    LLM_PROVIDER: str = "ollama"  # "ollama" | "groq" | "gemini" | "openai"
+    # LLM Settings: In production (Render), default to "groq". In local dev, default to "ollama".
+    LLM_PROVIDER: str = "groq" if _detect_production() else "ollama"
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "llama3:8b"
     GROQ_API_KEY: Optional[str] = None

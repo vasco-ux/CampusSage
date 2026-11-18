@@ -1,7 +1,7 @@
 import re
 import json
 import httpx
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 from app.config import settings
 from app.rag.prompts import SYSTEM_PROMPT, RAG_PROMPT_TEMPLATE
@@ -138,10 +138,51 @@ class CampusRAGGenerator:
 
         # 3. Attempt LLM generation
         answer = None
-        if settings.LLM_PROVIDER == "ollama":
-            answer = cls._call_ollama(full_prompt)
-        elif settings.LLM_PROVIDER == "groq" and settings.GROQ_API_KEY:
-            answer = cls._call_groq(full_prompt)
+        is_production = settings.ENVIRONMENT.lower() == "production" or bool(os.getenv("RENDER"))
+
+        if settings.LLM_PROVIDER == "groq":
+            if settings.GROQ_API_KEY and settings.GROQ_API_KEY.strip():
+                content, groq_err = cls._call_groq(full_prompt)
+                if content:
+                    answer = content
+                elif groq_err:
+                    print(f"[GROQ ERROR] {groq_err}")
+                    err_msg = (
+                        f"⚠️ **Groq Cloud AI Notice** ({groq_err})\n\n"
+                        f"Showing verified evidence from official college notice records below:\n\n"
+                    )
+                    answer = err_msg + cls._synthesize_grounded_answer(question, retrieved_chunks)
+            else:
+                # Missing Groq API key in production / Groq mode: provide explicit guidance without crashing
+                guide_msg = (
+                    "⚠️ **Groq API Key Required in Cloud Deployment**\n\n"
+                    "CampusSage is configured to use **Groq** for high-speed cloud AI inference, but `GROQ_API_KEY` has not been added to your Render Environment Variables.\n\n"
+                    "**To enable live AI generation on Render:**\n"
+                    "1. Get a free API key at [console.groq.com](https://console.groq.com)\n"
+                    "2. In your Render Dashboard, go to your Web Service $\\rightarrow$ **Environment**\n"
+                    "3. Add: `GROQ_API_KEY` = *your_groq_api_key*\n"
+                    "4. Click **Save Changes** (Render will automatically reload with live AI enabled).\n\n"
+                    "---\n\n"
+                    "**Verified Evidence from Official College Circular:**\n\n"
+                )
+                answer = guide_msg + cls._synthesize_grounded_answer(question, retrieved_chunks)
+
+        elif settings.LLM_PROVIDER == "ollama":
+            if is_production:
+                # Production guard: Never attempt localhost:11434 on Render/cloud
+                prod_guard_msg = (
+                    "⚠️ **Local Ollama Not Available in Cloud Production**\n\n"
+                    "CampusSage detected `LLM_PROVIDER=ollama` in a cloud environment. "
+                    "Local Ollama (`http://localhost:11434`) only runs on your local machine and cannot be reached in the cloud.\n\n"
+                    "**To fix this on Render:**\n"
+                    "1. Set `LLM_PROVIDER=groq` in your Render Environment Variables.\n"
+                    "2. Add your free `GROQ_API_KEY` from [console.groq.com](https://console.groq.com).\n\n"
+                    "---\n\n"
+                    "**Verified Evidence from Official College Circular:**\n\n"
+                )
+                answer = prod_guard_msg + cls._synthesize_grounded_answer(question, retrieved_chunks)
+            else:
+                answer = cls._call_ollama(full_prompt)
 
         # 4. Fallback Grounded Synthesizer (Zero-cost, works offline with 100% factual accuracy)
         if not answer:
@@ -198,12 +239,14 @@ class CampusRAGGenerator:
         return None
 
     @staticmethod
-    def _call_groq(prompt: str) -> Optional[str]:
+    def _call_groq(prompt: str) -> Tuple[Optional[str], Optional[str]]:
+        if not settings.GROQ_API_KEY or not settings.GROQ_API_KEY.strip():
+            return None, "GROQ_API_KEY is not set."
         try:
-            with httpx.Client(timeout=10.0) as client:
+            with httpx.Client(timeout=12.0) as client:
                 res = client.post(
                     "https://api.groq.com/openai/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {settings.GROQ_API_KEY}"},
+                    headers={"Authorization": f"Bearer {settings.GROQ_API_KEY.strip()}"},
                     json={
                         "model": settings.GROQ_MODEL,
                         "messages": [
@@ -214,10 +257,17 @@ class CampusRAGGenerator:
                     }
                 )
                 if res.status_code == 200:
-                    return res.json()["choices"][0]["message"]["content"]
-        except Exception:
-            pass
-        return None
+                    data = res.json()
+                    content = data["choices"][0]["message"]["content"]
+                    return content, None
+                elif res.status_code == 401:
+                    return None, "Invalid GROQ_API_KEY. Please verify your key on console.groq.com."
+                elif res.status_code == 429:
+                    return None, "Groq API rate limit reached. Please retry in a few moments."
+                else:
+                    return None, f"Groq API returned HTTP {res.status_code}: {res.text[:100]}"
+        except Exception as e:
+            return None, f"Groq connection error: {str(e)}"
 
     @staticmethod
     def _synthesize_grounded_answer(question: str, chunks: List[Dict[str, Any]]) -> str:
