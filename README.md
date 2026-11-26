@@ -2,12 +2,12 @@
 ### AI-Powered Web Information & Opportunity Hub
 > *"Discover jobs, internships, scholarships, notices, deadlines, events, and useful information from websites in one place."*
 
-*Active Initial Source: Government Engineering College, Ajmer (ecajmer.ac.in) — 54 Public Sections & Document Ingestion*
+*Active Initial Source: Government Engineering College, Ajmer (ecajmer.ac.in) —  Public Sections & Document Ingestion*
 
 ---
 
 ## 🌟 Target Institution & Website-Wide Coverage
-- **College:** Government Engineering College, Ajmer (GEC Ajmer)
+- **Example College:** Government Engineering College, Ajmer (GEC Ajmer)
 - **Official Website:** `https://www.ecajmer.ac.in/`
 - **Coverage Scope:** **All 54 public sections** of the college portal:
   1. **Administration & Institutional:** Principal's Address & Vision (`/administration/PrincipalMessage`), Registrar (`/ui/cells/registrar/circulars`), Accounts Section (`/ui/cells/accounts/circulars`), Mandatory Disclosures (`/api/mandatory-disclosures/get-all`).
@@ -38,7 +38,7 @@ College circulars and academic notices are frequently published as fragmented PD
 - Scholarship application windows and eligibility criteria
 - Campus placement drives and industrial visit notifications
 
-**CampusSage** solves this problem by crawling all 54 public college notice boards and departmental portals, extracting text from both webpage overviews and PDF circulars, chunking and embedding them into a local **ChromaDB vector database**, and answering student queries using strict **evidence-grounded retrieval**.
+**CampusSage** solves this problem by crawling all public college notice boards and departmental portals, extracting text from both webpage overviews and PDF circulars, chunking and embedding them into a local **ChromaDB vector database**, and answering student queries using strict **evidence-grounded retrieval**.
 
 ### ✨ Core Features
 1. **Interactive Multi-Section Student Chatbot:** Natural language inquiry interface with Section Scope filtering (All College, Examinations, Hostels, Library, Proctor, CSE Dept, etc.) and streaming responses.
