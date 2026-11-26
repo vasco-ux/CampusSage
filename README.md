@@ -30,7 +30,7 @@
 ## 🌟 Project Purpose & Highlights
 
 College circulars and academic notices are frequently published as fragmented PDF documents and web posts across different departmental notice boards. Students struggle to locate accurate, updated information regarding:
-- BTU/RTU Examination form deadlines and fee structures
+- Examination form deadlines and fee structures
 - Proctor Office student discipline and anti-ragging guidelines
 - Hostel fee schedules, room shifting orders, and curfew rules
 - Central Library Book Bank distribution schedules
@@ -184,7 +184,7 @@ CampusSage_Project/
 
 ## 🧪 Automated Testing & Verification
 
-### 1. Run Complete End-to-End System Test (GEC Ajmer):
+### 1. Run Complete End-to-End System Test:
 ```powershell
 python E:\CampusSage_Project\test_full_system.py
 ```
@@ -230,14 +230,7 @@ Settings are managed in `backend/.env`.
    ```
 
 ### 2. Free Hosted LLM via Groq API (Ultra-Fast)
-1. Get a free API key at [console.groq.com](https://console.groq.com).
-2. In `backend/.env`:
-   ```env
-   LLM_PROVIDER=groq
-   GROQ_API_KEY=gsk_your_groq_api_key_here
-   GROQ_MODEL=llama-3.3-70b-versatile
-   ```
-
+Website link - https://campussage.onrender.com
 ---
 
 ## 🎯 Viva & Presentation Guide
